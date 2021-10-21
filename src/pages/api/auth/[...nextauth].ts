@@ -1,5 +1,8 @@
 import NextAuth from "next-auth"
 import Providers from "next-auth/providers"
+import { query as q} from 'faunadb';
+import { fauna } from '../../../services/fauna';
+import { signIn } from "next-auth/client";
 
 export default NextAuth({
   
@@ -11,10 +14,54 @@ export default NextAuth({
         no caso do github, pode apenas pegar informações básicas como nome do usuários, ou até mesmo informações mais avançadas, como repositórios públicos e privados
       */
       scope: 'read:user'
-      /*caso tivesse mais escopoes, bastaria separá-los com vírgula. 
+      /*caso tivesse mais escopos, bastaria separá-los com vírgula. 
       Ex: 'read:user, escopo2,escopo3,etc'
       */
     }),
-    // ...add more providers here
   ],
+  callbacks: {
+    async signIn(user, account, profile) {
+        const {email} = user;
+
+        try{
+            await fauna.query(
+                //se NÃO existir usuário com o mesmo e-mail
+                q.If(
+                  q.Not(
+                    q.Exists(
+                      q.Match(
+                        //primeiro seleciona qual o index para utilizar como parâmetro
+                        q.Index('user_by_email'),
+                        //depois passa o valor para buscar
+                        //Casefold normaliza a string, transformando tudo para lowerCase
+                        q.Casefold(user.email)
+                      )
+                    )
+                  ),
+                  
+                  //IF TRUE, cria
+                  q.Create(
+                    q.Collection('users'),
+                    {data: {email} }
+                  ),
+
+                  //ELSE(já existe usuário com o e-mail), busca do BD o registro
+                  q.Get(
+                    q.Match(
+                      q.Index('user_by_email'),
+                      q.Casefold(user.email)
+                    )
+                  )
+                )
+            );
+
+            //retorno TRUE quer dizer que tudo deu certo e vice-versa caso for FALSE
+            return true;
+        } catch{
+            return false;
+        }
+        
+        
+    },
+  }
 })
